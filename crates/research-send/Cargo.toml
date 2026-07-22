@@ -1,0 +1,26 @@
+[package]
+name = "research-send"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "CLI and Brave/Chrome native messaging host for research-ingest"
+
+[[bin]]
+name = "research-send"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+directories.workspace = true
+research-core.workspace = true
+research-extract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

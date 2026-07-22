@@ -1,0 +1,15 @@
+[Unit]
+Description=research-zotero export watcher
+After=network-online.target
+
+[Service]
+Type=simple
+# Set ZOTERO_EXPORT_DIR to your Better BibTeX auto-export directory.
+Environment=ZOTERO_EXPORT_DIR=%h/Zotero/export
+ExecStart=%h/.cargo/bin/research-zotero watch --export-dir ${ZOTERO_EXPORT_DIR}
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/research-core",
+    "crates/research-extract",
+    "crates/research-ingest",
+    "crates/research-send",
+    "crates/research-mcp",
+    "crates/research-zotero",
+]
+default-members = [
+    "crates/research-ingest",
+    "crates/research-send",
+    "crates/research-mcp",
+    "crates/research-zotero",
+]
+
+[workspace.package]
+version = "0.1.0-dev.1"
+edition = "2021"
+license = "MIT"
+authors = ["theesfeld"]
+repository = "https://github.com/theesfeld/research-ingest"
+rust-version = "1.80"
+
+[workspace.dependencies]
+research-core = { path = "crates/research-core" }
+research-extract = { path = "crates/research-extract" }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+directories = "6"
+notify = "7"
+pdf-extract = "0.8"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+hex = "0.4"

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>research-ingest</title>
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="eyebrow">theesfeld · MIT · 0.1.0-dev.1</p>
+      <h1>research-ingest</h1>
+      <p class="lede">
+        Local-first research ingest for Obsidian. Browser send, vault watch, Grok
+        SuperGrok session processing. No pay-per-token xAI API by default.
+      </p>
+      <p class="cta-row">
+        <a class="cta" href="https://github.com/theesfeld/research-ingest">GitHub</a>
+        <a class="cta secondary" href="https://github.com/theesfeld/research-ingest/issues/1"
+          >Phase tracker #1</a
+        >
+      </p>
+    </header>
+
+    <main>
+      <section>
+        <h2>Install</h2>
+        <pre><code>git clone https://github.com/theesfeld/research-ingest.git
+cd research-ingest
+cargo install --path crates/research-ingest
+cargo install --path crates/research-send
+cargo install --path crates/research-mcp
+research-ingest init
+research-ingest watch</code></pre>
+      </section>
+
+      <section>
+        <h2>AI path</h2>
+        <p>
+          Language work uses your logged-in <code>grok</code> CLI session
+          (SuperGrok). The tools remove <code>XAI_API_KEY</code> from the child
+          environment so session auth wins.
+        </p>
+      </section>
+
+      <section>
+        <h2>Vault layout</h2>
+        <pre><code>Obsidian Vault/
+  raw/incoming/     ← drop or browser send
+  raw/processed/
+  raw/extracts/
+  wiki/projects/&lt;slug&gt;/
+  index.md
+  map-of-content.md</code></pre>
+      </section>
+    </main>
+
+    <footer>
+      <p>License: MIT · Pre-1.0: minor versions may include breaking changes.</p>
+    </footer>
+  </body>
+</html>
