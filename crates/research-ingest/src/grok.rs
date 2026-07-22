@@ -7,22 +7,73 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use research_core::config::GrokSessionConfig;
+use research_core::vault;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-/// Structured result we ask Grok to return as JSON in a fenced block.
+/// Structured result we ask Grok to return as JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiIngestResult {
     pub project_slug: String,
     pub project_title: String,
     pub note_title: String,
     pub summary: String,
+    #[serde(default)]
     pub entities: Vec<String>,
     /// Obsidian-ready markdown body (with footnotes).
     pub markdown: String,
+    #[serde(default)]
     pub tags: Vec<String>,
+}
+
+impl AiIngestResult {
+    /// Validate and normalize fields. Returns Err if critically incomplete.
+    pub fn validate_and_normalize(mut self) -> Result<Self> {
+        self.project_slug = vault::slugify(&self.project_slug);
+        if self.project_slug.is_empty() {
+            self.project_slug = "inbox".into();
+        }
+        self.project_title = self.project_title.trim().to_string();
+        self.note_title = self.note_title.trim().to_string();
+        self.summary = self.summary.trim().to_string();
+        self.markdown = self.markdown.trim().to_string();
+
+        if self.project_title.is_empty() {
+            self.project_title = self.project_slug.replace('-', " ");
+        }
+        if self.note_title.is_empty() {
+            bail!("note_title is empty");
+        }
+        if self.summary.is_empty() {
+            bail!("summary is empty");
+        }
+        if self.markdown.chars().count() < 40 {
+            bail!("markdown body too short");
+        }
+        // Dedupe tags/entities, trim.
+        self.entities = normalize_list(self.entities);
+        self.tags = normalize_list(self.tags);
+        if self.tags.is_empty() {
+            self.tags.push("ingest".into());
+        }
+        Ok(self)
+    }
+}
+
+fn normalize_list(items: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for i in items {
+        let t = i.trim().to_string();
+        if t.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|x: &String| x.eq_ignore_ascii_case(&t)) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 pub async fn run_ingest_ai(
@@ -30,20 +81,81 @@ pub async fn run_ingest_ai(
     system_prompt: &str,
     user_payload: &str,
 ) -> Result<AiIngestResult> {
-    let prompt = format!(
-        "{system_prompt}\n\n---\n\n# Input to process\n\n{user_payload}\n\n---\n\n\
-         Reply with a single JSON object only (no prose outside JSON) with keys:\n\
-         project_slug, project_title, note_title, summary, entities (array of strings),\n\
-         markdown (Obsidian note body with footnotes), tags (array of strings).\n\
-         project_slug must be lowercase kebab-case.\n"
-    );
+    let schema = OUTPUT_SCHEMA;
+    let mut last_err = None;
+    let attempts = grok.max_retries.saturating_add(1);
 
-    let raw = run_grok_prompt(grok, &prompt).await?;
-    parse_ai_result(&raw)
+    for attempt in 1..=attempts {
+        let repair = if let Some(err) = &last_err {
+            format!(
+                "\n\n# Repair instruction\n\
+                 Your previous reply failed validation: {err}\n\
+                 Return ONLY one valid JSON object. No markdown fences. No prose.\n"
+            )
+        } else {
+            String::new()
+        };
+
+        let prompt = format!(
+            "{system_prompt}\n\n\
+             ---\n\n\
+             # Output contract (mandatory)\n\
+             {schema}\n\n\
+             ---\n\n\
+             # Input to process\n\n\
+             {user_payload}\n\
+             {repair}\n\
+             # Final instruction\n\
+             Reply with a single JSON object only. Do not wrap in markdown fences.\n\
+             Do not call tools. Do not ask questions.\n"
+        );
+
+        info!("Grok ingest attempt {attempt}/{attempts}");
+        let raw = match run_grok_prompt(grok, &prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(format!("spawn/run: {e:#}"));
+                warn!("Grok run failed attempt {attempt}: {e:#}");
+                continue;
+            }
+        };
+
+        match parse_ai_result(&raw).and_then(|r| r.validate_and_normalize()) {
+            Ok(ok) => return Ok(ok),
+            Err(e) => {
+                last_err = Some(e.to_string());
+                warn!("Grok parse/validate failed attempt {attempt}: {e:#}");
+            }
+        }
+    }
+
+    bail!(
+        "Grok session failed after {attempts} attempt(s): {}",
+        last_err.unwrap_or_else(|| "unknown".into())
+    )
 }
 
+const OUTPUT_SCHEMA: &str = r#"Return exactly one JSON object with these keys:
+{
+  "project_slug": "kebab-case-string",
+  "project_title": "Human title for the project",
+  "note_title": "Title for this note",
+  "summary": "1-3 sentence factual summary",
+  "entities": ["Name", "Org", "Product"],
+  "markdown": "Full Obsidian note body with ## headings, key points, and footnotes like [^1]\n\n[^1]: source",
+  "tags": ["topic", "source-type"]
+}
+
+Rules:
+- project_slug: lowercase a-z 0-9 hyphens only; reuse existing project when listed and it fits.
+- Prefer project_slug "inbox" only when no topic is clear.
+- markdown: use clear headings; include footnotes that cite URL or file name; no marketing language.
+- entities: people, orgs, products, standards, places that matter; empty array if none.
+- Do not invent facts that are not in the input.
+- Do not include keys other than those listed.
+"#;
+
 pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<String> {
-    // Prefer prompt file to avoid argv length limits.
     let dir = research_core::config::state_dir().join("prompts");
     fs::create_dir_all(&dir)?;
     let prompt_path = dir.join(format!("prompt-{}.md", uuid::Uuid::new_v4()));
@@ -56,6 +168,8 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
         .arg("--output-format")
         .arg("plain")
         .arg("--verbatim")
+        .arg("--max-turns")
+        .arg("2")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -97,12 +211,19 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
     if !output.status.success() {
+        // Retry without --tools "" if CLI rejects empty tools.
+        if stderr.contains("tools") || output.status.code() == Some(2) {
+            warn!("grok failed (will note): {}", truncate(&stderr, 400));
+        }
         warn!("grok stderr: {stderr}");
-        bail!(
-            "grok exited with status {:?}: {}",
-            output.status.code(),
-            truncate(&stderr, 800)
-        );
+        // Still accept stdout if present (some CLIs non-zero with partial output).
+        if stdout.trim().is_empty() {
+            bail!(
+                "grok exited with status {:?}: {}",
+                output.status.code(),
+                truncate(&stderr, 800)
+            );
+        }
     }
 
     if stdout.trim().is_empty() {
@@ -115,27 +236,15 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
 }
 
 fn parse_ai_result(raw: &str) -> Result<AiIngestResult> {
-    // Prefer fenced ```json block.
     if let Some(json) = extract_json_block(raw) {
         return serde_json::from_str(json)
             .with_context(|| format!("parse AI JSON: {}", truncate(json, 200)));
     }
-    // Whole response as JSON.
     let trimmed = raw.trim();
     if trimmed.starts_with('{') {
         return serde_json::from_str(trimmed).context("parse AI JSON root");
     }
-    // Fallback: wrap freeform markdown.
-    warn!("AI response was not JSON; wrapping as note body");
-    Ok(AiIngestResult {
-        project_slug: "inbox".into(),
-        project_title: "Inbox".into(),
-        note_title: "Ingest note".into(),
-        summary: first_line(raw),
-        entities: vec![],
-        markdown: raw.to_string(),
-        tags: vec!["ingest".into()],
-    })
+    bail!("response is not JSON: {}", truncate(trimmed, 180));
 }
 
 fn extract_json_block(raw: &str) -> Option<&str> {
@@ -146,7 +255,19 @@ fn extract_json_block(raw: &str) -> Option<&str> {
             return Some(after[..end].trim());
         }
     }
-    // First { … last }
+    if let Some(start) = raw.find("```") {
+        let after = &raw[start + 3..];
+        let after = after
+            .strip_prefix('\n')
+            .or_else(|| after.find('\n').map(|i| &after[i + 1..]))
+            .unwrap_or(after);
+        if let Some(end) = after.find("```") {
+            let block = after[..end].trim();
+            if block.starts_with('{') {
+                return Some(block);
+            }
+        }
+    }
     let start = raw.find('{')?;
     let end = raw.rfind('}')?;
     if end > start {
@@ -154,15 +275,6 @@ fn extract_json_block(raw: &str) -> Option<&str> {
     } else {
         None
     }
-}
-
-fn first_line(s: &str) -> String {
-    s.lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("summary")
-        .chars()
-        .take(200)
-        .collect()
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -181,12 +293,11 @@ pub fn load_system_prompt(override_path: &Option<PathBuf>) -> String {
             return t;
         }
     }
-    // Optional prompts next to the binary install or current directory.
     for candidate in [
         PathBuf::from("prompts/ingest_system.md"),
         research_core::config::config_dir().join("ingest_system.md"),
     ] {
-        if let Ok(t) = fs::read_to_string(candidate) {
+        if let Ok(t) = fs::read_to_string(&candidate) {
             return t;
         }
     }
@@ -194,19 +305,56 @@ pub fn load_system_prompt(override_path: &Option<PathBuf>) -> String {
 }
 
 pub const DEFAULT_INGEST_PROMPT: &str = r#"You are the research ingest assistant for a local Obsidian vault.
-You work from a Grok subscription session (not a pay-per-token API key path).
+You run on a Grok SuperGrok subscription session (Grok Build login).
+You do not use a pay-per-token console API.
 
-Tasks:
-1. Read the source material and metadata.
-2. Choose a project_slug (kebab-case) and project_title. Reuse an existing project when the list is provided and it fits.
-3. Write a clear Obsidian markdown note with:
-   - short summary
-   - key points
-   - entities (people, orgs, products, standards)
-   - footnotes / citations that point at the source URL or file name
-   - wikilinks when you reference related project concepts
-4. Prefer precise technical language. Do not use marketing tone.
-5. If content is thin, still produce a short honest note; put it in project_slug "inbox" when no project fits.
+## Role
 
-Output: one JSON object only as specified by the user message.
+Convert raw research captures (web clips, PDFs, OCR text, media transcripts) into durable project notes.
+
+## Rules
+
+1. Read only the provided input. Do not invent sources, quotes, or facts.
+2. Choose project_slug (kebab-case) and project_title.
+   Reuse an existing project from the list when the topic fits.
+3. Write markdown that a human can scan: short summary, key points, entities, footnotes.
+4. Footnotes must cite the source URL and/or source file name when present.
+5. Use precise technical language. Do not use marketing tone, slang, or filler.
+6. If the input is thin, still write a short honest note. Use project_slug "inbox" when no project fits.
+7. When the input includes a transcript section, treat it as primary evidence and quote carefully.
+8. When the input is OCR, note that text may contain recognition errors; do not silently "fix" uncertain words into false facts.
+
+## Output
+
+Return one JSON object only, matching the output contract in the user message.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_fenced_json() {
+        let raw = "Here you go:\n```json\n{\n  \"project_slug\": \"elevator-modernization\",\n  \"project_title\": \"Elevator Modernization\",\n  \"note_title\": \"Code notes\",\n  \"summary\": \"Summary of elevator code updates for modernization projects.\",\n  \"entities\": [\"ASME A17.1\"],\n  \"markdown\": \"## Key points\\n\\n- Point one about modernization.\\n- Point two about safety.\\n\\n[^1]: source\\n\",\n  \"tags\": [\"elevators\"]\n}\n```\n";
+        let r = parse_ai_result(raw)
+            .unwrap()
+            .validate_and_normalize()
+            .unwrap();
+        assert_eq!(r.project_slug, "elevator-modernization");
+        assert!(!r.markdown.is_empty());
+    }
+
+    #[test]
+    fn reject_short_markdown() {
+        let r = AiIngestResult {
+            project_slug: "x".into(),
+            project_title: "X".into(),
+            note_title: "N".into(),
+            summary: "S".into(),
+            entities: vec![],
+            markdown: "too short".into(),
+            tags: vec![],
+        };
+        assert!(r.validate_and_normalize().is_err());
+    }
+}

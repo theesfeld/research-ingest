@@ -18,9 +18,20 @@ cargo install --path crates/research-zotero
 | Tool | Purpose | Required? |
 |------|---------|-----------|
 | Grok Build CLI (`grok`) | SuperGrok session AI | Yes for AI notes |
-| `tesseract` | Image OCR | Optional |
-| `ffmpeg` / `ffprobe` | Media metadata | Optional |
-| `whisper` / `whisper-cli` | Transcripts | Optional (not auto-wired yet) |
+| `tesseract` | Image OCR | Required for OCR |
+| `ffmpeg` / `ffprobe` | Media extract + metadata | Required for video/audio transcript |
+| `whisper-cli` (whisper.cpp) | Auto transcripts | Required for transcripts |
+
+### Nix user profile (works without editing system config)
+
+```sh
+nix profile add nixpkgs#tesseract nixpkgs#ffmpeg nixpkgs#whisper-cpp
+mkdir -p ~/.local/share/research-ingest/models
+cd ~/.local/share/research-ingest/models
+whisper-cpp-download-ggml-model base.en
+export PATH="$HOME/.nix-profile/bin:$PATH"
+research-ingest doctor
+```
 
 ### NixOS / Home Manager
 
@@ -28,6 +39,7 @@ cargo install --path crates/research-zotero
 home.packages = with pkgs; [
   tesseract
   ffmpeg
+  whisper-cpp
 ];
 # Install research-ingest from this repo with cargo or a flake overlay you maintain.
 ```

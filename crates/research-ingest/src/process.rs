@@ -75,7 +75,8 @@ async fn run_job(cfg: &Config, queue: &JobQueue, job: &mut IngestJob) -> Result<
     queue.put(job)?;
 
     research_extract::require_readable(&path)?;
-    let extracted = research_extract::extract_file(&path)
+    let tools = cfg.tools.resolve();
+    let extracted = research_extract::extract_file(&path, &tools)
         .with_context(|| format!("extract {}", path.display()))?;
 
     job.title = extracted.title.clone();
@@ -228,10 +229,28 @@ fn escape_yaml(s: &str) -> String {
 }
 
 fn summary_heuristic(ex: &Extracted) -> String {
+    // Prefer transcript body when present (media pipeline).
+    if let Some(idx) = ex.text.find("## Transcript") {
+        let after = &ex.text[idx + "## Transcript".len()..];
+        let body = after
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.starts_with('#'))
+            .unwrap_or("");
+        if body.len() > 8 {
+            return body.chars().take(240).collect();
+        }
+    }
     ex.text
         .lines()
         .map(str::trim)
-        .find(|l| l.len() > 20)
+        .find(|l| {
+            l.len() > 20
+                && !l.starts_with('{')
+                && !l.starts_with('"')
+                && !l.starts_with("## Media")
+                && !l.starts_with("```")
+        })
         .unwrap_or("Extracted source material.")
         .chars()
         .take(240)

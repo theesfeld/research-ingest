@@ -3,8 +3,9 @@
 Local-first research ingest and knowledge routing for [Obsidian](https://obsidian.md), driven by **Grok SuperGrok session** (Grok Build CLI login).
 
 <!-- agents:status:begin -->
-> **Status:** Phase 1 in progress · [Issue #1](https://github.com/theesfeld/research-ingest/issues/1) · Version `0.1.0-dev.1` · License MIT  
-> **AI:** `grok-session` only (no default xAI API key / pay-per-token path)
+> **Status:** Active · [Issue #2](https://github.com/theesfeld/research-ingest/issues/2) · Version `0.1.0-dev.2` · License MIT  
+> **AI:** `grok-session` only (no default xAI API key / pay-per-token path)  
+> **Media:** OCR (tesseract) · auto transcript (ffmpeg + whisper-cli)
 <!-- agents:status:end -->
 
 ## What it does
@@ -27,7 +28,17 @@ Set `ai_backend = "queue-only"` in config if you want extract-only notes until y
 
 ## Install
 
-Needs: Rust toolchain, Grok Build CLI (`grok`), optional `tesseract` and `ffmpeg`.
+Needs: Rust toolchain, Grok Build CLI (`grok`). For OCR and transcripts:
+
+```sh
+# Nix (example)
+nix profile add nixpkgs#tesseract nixpkgs#ffmpeg nixpkgs#whisper-cpp
+
+# Whisper model (base.en is a good default)
+mkdir -p ~/.local/share/research-ingest/models
+cd ~/.local/share/research-ingest/models
+whisper-cpp-download-ggml-model base.en
+```
 
 ```sh
 git clone https://github.com/theesfeld/research-ingest.git
@@ -36,7 +47,9 @@ cargo install --path crates/research-ingest
 cargo install --path crates/research-send
 cargo install --path crates/research-mcp
 cargo install --path crates/research-zotero
+export PATH="$HOME/.cargo/bin:$HOME/.nix-profile/bin:$PATH"
 research-ingest init
+research-ingest doctor
 ```
 
 Default vault path: `~/Documents/Obsidian Vault`.
@@ -66,7 +79,30 @@ systemctl --user enable --now research-ingest.service
 
 See [packaging/nix-notes.md](packaging/nix-notes.md) for Nix/Gentoo/CachyOS/Void notes.
 
+## OCR and auto transcript
+
+| Feature | Tools | Config |
+|---------|--------|--------|
+| Image OCR | `tesseract` | `[tools] enable_ocr`, `ocr_lang` |
+| Media metadata | `ffprobe` | auto on PATH |
+| Auto transcript | `ffmpeg` + `whisper-cli` + ggml model | `[tools] enable_transcript`, `whisper_model`, `whisper_lang` |
+
+The watcher extracts text first (including OCR and transcript), then sends that text to the Grok session for project routing and note writing.
+
+```sh
+research-ingest doctor
+research-ingest process ~/path/to/scan.png
+research-ingest process ~/path/to/talk.mp4
+```
+
 ## Browser: Send to Grok Research
+
+**Can the extension be pure Rust?** No. Brave/Chrome MV3 loads a JavaScript service worker. Rust cannot replace that shell. What is pure Rust:
+
+- `research-send` native messaging host
+- all ingest / extract / MCP / Zotero tools
+
+The extension stays minimal JS that only calls the native host.
 
 1. Build and install the native host:
 
@@ -153,7 +189,19 @@ binary = "grok"
 yolo = true
 timeout_secs = 600
 effort = "high"
+max_retries = 2
 # model = "grok-build"   # optional
+
+[tools]
+enable_ocr = true
+enable_transcript = true
+ocr_lang = "eng"
+whisper_lang = "en"
+# optional absolute paths if not on PATH:
+# tesseract = "/home/you/.nix-profile/bin/tesseract"
+# ffmpeg = "ffmpeg"
+# whisper = "whisper-cli"
+whisper_model = "/home/you/.local/share/research-ingest/models/ggml-base.en.bin"
 ```
 
 ## Development
