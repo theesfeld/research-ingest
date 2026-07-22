@@ -57,6 +57,8 @@ enum Commands {
     Status,
     /// Print effective config and paths.
     Paths,
+    /// Check OCR, ffmpeg, whisper, model, and Grok binary.
+    Doctor,
 }
 
 #[tokio::main]
@@ -83,7 +85,27 @@ async fn main() -> Result<()> {
         Commands::Drain { limit } => process::drain_queue(&cfg, limit).await?,
         Commands::Status => cmd_status(&cfg)?,
         Commands::Paths => cmd_paths(&cfg)?,
+        Commands::Doctor => cmd_doctor(&cfg)?,
     }
+    Ok(())
+}
+
+fn cmd_doctor(cfg: &Config) -> Result<()> {
+    let tools = cfg.tools.resolve();
+    println!("vault={}", cfg.vault_path.display());
+    println!("ai_backend={:?}", cfg.ai_backend);
+    println!("grok_binary={}", cfg.grok.binary);
+    if research_core::tools::which(&cfg.grok.binary).is_some() {
+        println!("grok_binary_found=yes");
+    } else {
+        println!("grok_binary_found=no");
+    }
+    println!("grok_max_retries={}", cfg.grok.max_retries);
+    for line in tools.doctor_lines() {
+        println!("{line}");
+    }
+    let model_dir = research_core::config::state_dir().join("models");
+    println!("models_dir={}", model_dir.display());
     Ok(())
 }
 
@@ -92,15 +114,17 @@ fn cmd_init(cfg: &Config) -> Result<()> {
     let vault = VaultPaths::new(&cfg.vault_path);
     vault.ensure_layout()?;
     let q = JobQueue::open_default()?;
-    // Seed system prompt next to config when missing.
+    // Seed / refresh hardened system prompt next to config.
     let prompt_dest = research_core::config::config_dir().join("ingest_system.md");
-    if !prompt_dest.exists() {
-        if let Err(e) = std::fs::write(&prompt_dest, grok::DEFAULT_INGEST_PROMPT) {
-            warn!("could not write {}: {e}", prompt_dest.display());
-        } else {
-            println!("Prompt:  {}", prompt_dest.display());
-        }
+    if let Err(e) = std::fs::write(&prompt_dest, grok::DEFAULT_INGEST_PROMPT) {
+        warn!("could not write {}: {e}", prompt_dest.display());
+    } else {
+        println!("Prompt:  {}", prompt_dest.display());
     }
+    // Ensure models dir exists for whisper weights.
+    let models = research_core::config::state_dir().join("models");
+    let _ = std::fs::create_dir_all(&models);
+    println!("Models:  {}", models.display());
     println!("Config:  {}", Config::config_file_path().display());
     println!("Vault:   {}", vault.root.display());
     println!("Incoming:{}", vault.incoming().display());

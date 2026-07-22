@@ -8,7 +8,7 @@
   </head>
   <body>
     <header class="hero">
-      <p class="eyebrow">theesfeld · MIT · 0.1.0-dev.1</p>
+      <p class="eyebrow">theesfeld · MIT · 0.1.0-dev.2</p>
       <h1>research-ingest</h1>
       <p class="lede">
         Local-first research ingest for Obsidian. Browser send, vault watch, Grok
@@ -40,6 +40,14 @@ research-ingest watch</code></pre>
           Language work uses your logged-in <code>grok</code> CLI session
           (SuperGrok). The tools remove <code>XAI_API_KEY</code> from the child
           environment so session auth wins.
+        </p>
+      </section>
+
+      <section>
+        <h2>OCR and transcript</h2>
+        <p>
+          Images use tesseract OCR. Audio and video use ffmpeg plus whisper.cpp
+          for automatic transcripts before Grok writes project notes.
         </p>
       </section>
 

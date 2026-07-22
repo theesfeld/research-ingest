@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::tools::ToolsConfig;
+
 /// How language work runs. Default is subscription session only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -38,6 +40,13 @@ pub struct GrokSessionConfig {
     /// Reasoning effort if supported (`high`, `xhigh`, …).
     #[serde(default)]
     pub effort: Option<String>,
+    /// Retries when Grok output fails JSON validation.
+    #[serde(default = "default_ai_retries")]
+    pub max_retries: u32,
+}
+
+fn default_ai_retries() -> u32 {
+    2
 }
 
 fn default_grok_bin() -> String {
@@ -59,6 +68,7 @@ impl Default for GrokSessionConfig {
             yolo: true,
             timeout_secs: default_timeout_secs(),
             effort: Some("high".into()),
+            max_retries: default_ai_retries(),
         }
     }
 }
@@ -85,6 +95,9 @@ pub struct Config {
     /// Max characters of extracted text to send to Grok per item.
     #[serde(default = "default_max_extract_chars")]
     pub max_extract_chars: usize,
+    /// OCR / ffmpeg / whisper tools.
+    #[serde(default)]
+    pub tools: ToolsConfig,
 }
 
 fn default_debounce_ms() -> u64 {
@@ -104,6 +117,7 @@ impl Default for Config {
             debounce_ms: default_debounce_ms(),
             ingest_prompt_path: None,
             max_extract_chars: default_max_extract_chars(),
+            tools: ToolsConfig::default(),
         }
     }
 }

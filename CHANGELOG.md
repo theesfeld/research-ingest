@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-dev.2] - 2026-07-22
+
+### Added
+
+- Hardened Grok ingest prompts with JSON schema, validation, and retries
+- OCR via tesseract with config + PATH discovery (`tools.*`)
+- Auto transcript via ffmpeg audio extract + whisper.cpp (`whisper-cli`)
+- `research-ingest doctor` for tool health
+- Default model path under `~/.local/share/research-ingest/models/`
+
+### Changed
+
+- Extract pipeline takes resolved tool paths (no silent “found but not wired” transcript)
+
+### Notes
+
+- Browser extensions cannot be pure Rust on Chromium/Brave MV3 (service worker must be JS); native host remains Rust
+
 ## [0.1.0-dev.1] - 2026-07-22
 
 ### Added
