@@ -3,8 +3,15 @@
   "name": "Send to Grok Research",
   "version": "0.1.0",
   "description": "Send page, selection, image, or link into the local research-ingest vault.",
-  "permissions": ["contextMenus", "activeTab", "storage", "nativeMessaging", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "storage",
+    "nativeMessaging",
+    "scripting",
+    "notifications"
+  ],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1:18765/*", "http://localhost:18765/*"],
   "background": {
     "service_worker": "background.js"
   },

@@ -1,10 +1,13 @@
 //! research-ingest — watch, extract, and process research into Obsidian via Grok session.
 
+mod drop_server;
+mod enable;
 mod grok;
 mod process;
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -36,7 +39,13 @@ struct Cli {
 enum Commands {
     /// Create config, vault folders, and print paths.
     Init,
-    /// Watch raw/incoming and process new files.
+    /// Install and start the always-on user systemd service.
+    Enable,
+    /// Stop and disable the always-on service.
+    Disable,
+    /// Show systemd service status.
+    ServiceStatus,
+    /// Watch raw/incoming and process new files (also serves Brave HTTP drop).
     Watch {
         /// Drain the queue once then exit (no long watch).
         #[arg(long)]
@@ -57,7 +66,7 @@ enum Commands {
     Status,
     /// Print effective config and paths.
     Paths,
-    /// Check OCR, ffmpeg, whisper, model, and Grok binary.
+    /// Check OCR, ffmpeg, whisper, model, Grok binary, and HTTP drop.
     Doctor,
 }
 
@@ -77,6 +86,9 @@ async fn main() -> Result<()> {
 
     match cli.cmd {
         Commands::Init => cmd_init(&cfg)?,
+        Commands::Enable => enable::enable_daemon(&cfg)?,
+        Commands::Disable => enable::disable_daemon()?,
+        Commands::ServiceStatus => enable::daemon_status()?,
         Commands::Watch { once } => cmd_watch(cfg, once).await?,
         Commands::Process { path } => {
             let path = config::expand_tilde(path);
@@ -101,11 +113,33 @@ fn cmd_doctor(cfg: &Config) -> Result<()> {
         println!("grok_binary_found=no");
     }
     println!("grok_max_retries={}", cfg.grok.max_retries);
+    println!("listen_http={}", cfg.listen_http);
+    println!("listen_addr={}", cfg.listen_addr);
     for line in tools.doctor_lines() {
         println!("{line}");
     }
     let model_dir = research_core::config::state_dir().join("models");
     println!("models_dir={}", model_dir.display());
+
+    // Service + health
+    let svc = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "research-ingest.service"])
+        .output();
+    if let Ok(o) = svc {
+        println!("systemd_user={}", String::from_utf8_lossy(&o.stdout).trim());
+    }
+    if cfg.listen_http {
+        let url = format!("http://{}/health", cfg.listen_addr);
+        match std::process::Command::new("curl")
+            .args(["-fsS", "--max-time", "2", &url])
+            .output()
+        {
+            Ok(o) if o.status.success() => {
+                println!("http_drop=up {}", String::from_utf8_lossy(&o.stdout).trim());
+            }
+            _ => println!("http_drop=down (start: research-ingest enable)"),
+        }
+    }
     Ok(())
 }
 
@@ -114,14 +148,12 @@ fn cmd_init(cfg: &Config) -> Result<()> {
     let vault = VaultPaths::new(&cfg.vault_path);
     vault.ensure_layout()?;
     let q = JobQueue::open_default()?;
-    // Seed / refresh hardened system prompt next to config.
     let prompt_dest = research_core::config::config_dir().join("ingest_system.md");
     if let Err(e) = std::fs::write(&prompt_dest, grok::DEFAULT_INGEST_PROMPT) {
         warn!("could not write {}: {e}", prompt_dest.display());
     } else {
         println!("Prompt:  {}", prompt_dest.display());
     }
-    // Ensure models dir exists for whisper weights.
     let models = research_core::config::state_dir().join("models");
     let _ = std::fs::create_dir_all(&models);
     println!("Models:  {}", models.display());
@@ -131,11 +163,13 @@ fn cmd_init(cfg: &Config) -> Result<()> {
     println!("Queue:   {}", q.root().display());
     println!("AI:      {:?}", cfg.ai_backend);
     println!("Grok bin:{}", cfg.grok.binary);
+    println!("HTTP:    {} ({})", cfg.listen_http, cfg.listen_addr);
     if cfg.ai_backend == AiBackend::GrokSession {
         println!(
             "Note: language work uses your Grok CLI session (SuperGrok). No xAI API key is used."
         );
     }
+    println!("Always-on: research-ingest enable");
     Ok(())
 }
 
@@ -147,6 +181,7 @@ fn cmd_paths(cfg: &Config) -> Result<()> {
     println!("projects={}", vault.projects().display());
     println!("config={}", Config::config_file_path().display());
     println!("ai_backend={:?}", cfg.ai_backend);
+    println!("listen_addr={}", cfg.listen_addr);
     Ok(())
 }
 
@@ -180,6 +215,16 @@ async fn cmd_watch(cfg: Config, once: bool) -> Result<()> {
     vault.ensure_layout()?;
     let queue = JobQueue::open_default()?;
 
+    // Always-on HTTP drop for Brave (background task).
+    if cfg.listen_http && !once {
+        let cfg_http = Arc::new(cfg.clone());
+        tokio::spawn(async move {
+            if let Err(e) = drop_server::run_drop_server(cfg_http).await {
+                error!("HTTP drop server stopped: {e:#}");
+            }
+        });
+    }
+
     if cfg.process_existing_on_start || once {
         enqueue_existing(&vault, &queue)?;
         process::drain_queue(&cfg, None).await?;
@@ -190,6 +235,9 @@ async fn cmd_watch(cfg: Config, once: bool) -> Result<()> {
 
     let incoming = vault.incoming();
     info!("watching {}", incoming.display());
+    if cfg.listen_http {
+        info!("Brave drop: POST http://{}/send", cfg.listen_addr);
+    }
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = notify::recommended_watcher(move |res| {
@@ -200,19 +248,17 @@ async fn cmd_watch(cfg: Config, once: bool) -> Result<()> {
         .watch(&incoming, RecursiveMode::NonRecursive)
         .with_context(|| format!("watch {}", incoming.display()))?;
 
-    // Keep watcher alive.
     let _watcher = watcher;
-
     let debounce = Duration::from_millis(cfg.debounce_ms);
+
     loop {
-        match rx.recv_timeout(Duration::from_secs(2)) {
+        // Use try_recv with async sleep so HTTP tasks keep running.
+        match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Ok(event)) => {
                 if !is_create_or_modify(&event.kind) {
                     continue;
                 }
-                // Debounce burst.
-                std::thread::sleep(debounce);
-                // Drain any further events.
+                tokio::time::sleep(debounce).await;
                 while rx.try_recv().is_ok() {}
 
                 for path in event.paths {
@@ -220,6 +266,11 @@ async fn cmd_watch(cfg: Config, once: bool) -> Result<()> {
                         continue;
                     }
                     if path.file_name().and_then(|n| n.to_str()) == Some("README.md") {
+                        continue;
+                    }
+                    // Wait for non-empty stable file (browser may still be writing).
+                    if let Err(e) = wait_stable(&path).await {
+                        warn!("stable wait {}: {e}", path.display());
                         continue;
                     }
                     match queue.find_by_source(&path) {
@@ -240,18 +291,33 @@ async fn cmd_watch(cfg: Config, once: bool) -> Result<()> {
             }
             Ok(Err(e)) => error!("watch event error: {e}"),
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Opportunistic drain of any leftover pending.
                 if let Ok(Some(_)) = queue.next_pending() {
                     if let Err(e) = process::drain_queue(&cfg, Some(1)).await {
                         error!("drain: {e:#}");
                     }
                 }
+                // Yield to tokio runtime for HTTP.
+                tokio::task::yield_now().await;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 bail_watch();
             }
         }
     }
+}
+
+async fn wait_stable(path: &std::path::Path) -> Result<()> {
+    let mut last = 0u64;
+    for _ in 0..20 {
+        let meta = std::fs::metadata(path)?;
+        let len = meta.len();
+        if len > 0 && len == last {
+            return Ok(());
+        }
+        last = len;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(())
 }
 
 fn bail_watch() -> ! {
@@ -282,7 +348,6 @@ fn enqueue_existing(vault: &VaultPaths, queue: &JobQueue) -> Result<()> {
         if queue.find_by_source(&path)?.is_some() {
             continue;
         }
-        // Skip already-done by hash if we can.
         if let Ok(hash) = research_core::vault::file_sha256(&path) {
             if queue.hash_seen(&hash)? {
                 info!("skip seen hash {}", path.display());

@@ -7,7 +7,7 @@
       body {
         font-family: system-ui, sans-serif;
         margin: 12px;
-        min-width: 220px;
+        min-width: 240px;
       }
       button {
         width: 100%;
@@ -19,12 +19,19 @@
         font-size: 12px;
         margin-top: 8px;
         color: #333;
+        white-space: pre-wrap;
+      }
+      .ok {
+        color: #0a7;
+      }
+      .bad {
+        color: #c22;
       }
     </style>
   </head>
   <body>
     <button id="send">Send page to Grok Research</button>
-    <div id="status"></div>
+    <div id="status">Checking daemon…</div>
     <script src="popup.js"></script>
   </body>
 </html>

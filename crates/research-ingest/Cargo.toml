@@ -16,6 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+directories.workspace = true
 notify.workspace = true
 research-core.workspace = true
 research-extract.workspace = true

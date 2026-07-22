@@ -3,9 +3,10 @@
 Local-first research ingest and knowledge routing for [Obsidian](https://obsidian.md), driven by **Grok SuperGrok session** (Grok Build CLI login).
 
 <!-- agents:status:begin -->
-> **Status:** Active · [Issue #2](https://github.com/theesfeld/research-ingest/issues/2) · Version `0.1.0-dev.2` · License MIT  
+> **Status:** Always-on · [Issue #4](https://github.com/theesfeld/research-ingest/issues/4) · Version `0.1.0-dev.3` · License MIT  
 > **AI:** `grok-session` only (no default xAI API key / pay-per-token path)  
-> **Media:** OCR (tesseract) · auto transcript (ffmpeg + whisper-cli)
+> **Media:** OCR (tesseract) · auto transcript (ffmpeg + whisper-cli)  
+> **Daily use:** Brave Send only — daemon runs in the background
 <!-- agents:status:end -->
 
 ## What it does
@@ -48,33 +49,30 @@ cargo install --path crates/research-send
 cargo install --path crates/research-mcp
 cargo install --path crates/research-zotero
 export PATH="$HOME/.cargo/bin:$HOME/.nix-profile/bin:$PATH"
-research-ingest init
+# SuperGrok session once (subscription login, not API key)
+grok login
+
+research-ingest enable
 research-ingest doctor
 ```
 
-Default vault path: `~/Documents/Obsidian Vault`.
+That starts the **always-on** user service: vault watch + HTTP drop on `127.0.0.1:18765`.
 
-Config file (created on `init`): `~/.config/research-ingest/config.toml`.
+Default vault path: `~/Documents/Obsidian Vault`.  
+Config: `~/.config/research-ingest/config.toml`.
 
-## Run the watcher
+### Daily use (only this)
 
-```sh
-# Log in to SuperGrok once (browser OAuth)
-grok login
+1. Load the unpacked extension once: `browser-extension/` in Brave.
+2. Right-click → **Send to Grok Research**, or **Ctrl+Shift+Y**, or the toolbar button.
 
-# Process existing incoming files, then watch
-research-ingest watch
-
-# One pass only
-research-ingest watch --once
-```
-
-systemd user unit:
+Background processing (OCR, transcript, Grok notes) continues without further action.
 
 ```sh
-cp packaging/systemd/research-ingest.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now research-ingest.service
+# Manual ops if needed
+research-ingest service-status
+research-ingest status
+research-ingest disable   # stop always-on
 ```
 
 See [packaging/nix-notes.md](packaging/nix-notes.md) for Nix/Gentoo/CachyOS/Void notes.

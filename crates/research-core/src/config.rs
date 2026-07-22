@@ -75,6 +75,7 @@ impl Default for GrokSessionConfig {
 
 /// Root application config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     /// Absolute path to the Obsidian vault root.
     pub vault_path: PathBuf,
@@ -98,6 +99,16 @@ pub struct Config {
     /// OCR / ffmpeg / whisper tools.
     #[serde(default)]
     pub tools: ToolsConfig,
+    /// Local HTTP drop for the browser extension (always-on path).
+    #[serde(default = "default_listen_addr")]
+    pub listen_addr: String,
+    /// Enable the local HTTP drop server while watching.
+    #[serde(default = "default_true")]
+    pub listen_http: bool,
+}
+
+fn default_listen_addr() -> String {
+    "127.0.0.1:18765".into()
 }
 
 fn default_debounce_ms() -> u64 {
@@ -118,6 +129,8 @@ impl Default for Config {
             ingest_prompt_path: None,
             max_extract_chars: default_max_extract_chars(),
             tools: ToolsConfig::default(),
+            listen_addr: default_listen_addr(),
+            listen_http: true,
         }
     }
 }

@@ -161,6 +161,10 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
     let prompt_path = dir.join(format!("prompt-{}.md", uuid::Uuid::new_v4()));
     fs::write(&prompt_path, prompt)?;
 
+    // Isolated HOME so the headless run does not load user MCP/plugins (Azure, etc.).
+    // Still reuses SuperGrok OAuth via symlink to real ~/.grok/auth.json.
+    let isolated = ensure_isolated_grok_home()?;
+
     let mut cmd = Command::new(&grok.binary);
     // Session auth only: strip pay-per-token API key so SuperGrok OAuth wins.
     cmd.arg("--prompt-file")
@@ -170,11 +174,20 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
         .arg("--verbatim")
         .arg("--max-turns")
         .arg("2")
+        // Do not pass --no-auto-update: the grok launcher already injects it.
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env_remove("XAI_API_KEY")
-        .env("RESEARCH_INGEST_AI", "1");
+        .env("RESEARCH_INGEST_AI", "1")
+        .env("HOME", &isolated)
+        // Keep real user for any path expansion that still needs it.
+        .env(
+            "RESEARCH_INGEST_REAL_HOME",
+            directories::UserDirs::new()
+                .map(|u| u.home_dir().display().to_string())
+                .unwrap_or_default(),
+        );
 
     if grok.yolo {
         cmd.arg("--yolo");
@@ -189,7 +202,7 @@ pub async fn run_grok_prompt(grok: &GrokSessionConfig, prompt: &str) -> Result<S
         cmd.arg(a);
     }
 
-    info!("running Grok session: {} …", grok.binary);
+    info!("running Grok session (isolated home): {} …", grok.binary);
     let child = cmd.spawn().with_context(|| {
         format!(
             "spawn `{}` (install Grok Build CLI and run `grok login` for SuperGrok session)",
@@ -284,6 +297,62 @@ fn truncate(s: &str, n: usize) -> String {
     } else {
         t
     }
+}
+
+/// Minimal Grok home: auth symlink + config without MCP/plugins.
+fn ensure_isolated_grok_home() -> Result<PathBuf> {
+    let base = research_core::config::state_dir().join("grok-home");
+    let grok_dir = base.join(".grok");
+    fs::create_dir_all(&grok_dir)?;
+
+    // Minimal config: no MCP servers, no marketplace plugins.
+    let cfg_path = grok_dir.join("config.toml");
+    let cfg = r#"
+[cli]
+auto_update = false
+
+[ui]
+yolo = true
+permission_mode = "always-approve"
+
+[features]
+telemetry = false
+feedback = false
+
+[plugins]
+enabled = []
+
+[memory]
+enabled = false
+"#;
+    fs::write(&cfg_path, cfg.trim_start())?;
+
+    // Point auth at the real SuperGrok login.
+    let real_auth = directories::UserDirs::new()
+        .map(|u| u.home_dir().join(".grok").join("auth.json"))
+        .unwrap_or_else(|| PathBuf::from("/nonexistent"));
+    let link = grok_dir.join("auth.json");
+    if real_auth.is_file() {
+        // Refresh symlink each run.
+        let _ = fs::remove_file(&link);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&real_auth, &link).with_context(|| {
+                format!("symlink auth {} → {}", real_auth.display(), link.display())
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::copy(&real_auth, &link)?;
+        }
+    } else {
+        warn!(
+            "no SuperGrok auth at {} — run `grok login` then restart the daemon",
+            real_auth.display()
+        );
+    }
+
+    Ok(base)
 }
 
 /// Load ingest system prompt from config path or embedded default.
