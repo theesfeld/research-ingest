@@ -3,10 +3,10 @@
 Local-first research ingest and knowledge routing for [Obsidian](https://obsidian.md), driven by **Grok SuperGrok session** (Grok Build CLI login).
 
 <!-- agents:status:begin -->
-> **Status:** Always-on · [Issue #4](https://github.com/theesfeld/research-ingest/issues/4) · Version `0.1.0-dev.3` · License MIT  
+> **Status:** Always-on · [Issue #6](https://github.com/theesfeld/research-ingest/issues/6) · Version `0.1.0-dev.4` · License MIT  
 > **AI:** `grok-session` only (no default xAI API key / pay-per-token path)  
 > **Media:** OCR (tesseract) · auto transcript (ffmpeg + whisper-cli)  
-> **Daily use:** Brave Send only — daemon runs in the background
+> **Daily use:** permanent **bookmark** or **clipboard hotkey** — no extension reload
 <!-- agents:status:end -->
 
 ## What it does
@@ -61,18 +61,30 @@ That starts the **always-on** user service: vault watch + HTTP drop on `127.0.0.
 Default vault path: `~/Documents/Obsidian Vault`.  
 Config: `~/.config/research-ingest/config.toml`.
 
-### Daily use (only this)
+### Daily use (no extension reload)
 
-1. Load the unpacked extension once: `browser-extension/` in Brave.
-2. Right-click → **Send to Grok Research**, or **Ctrl+Shift+Y**, or the toolbar button.
+Unpacked Brave extensions are optional and annoying. **Prefer the permanent bookmark.**
 
-Background processing (OCR, transcript, Grok notes) continues without further action.
+**One-time:**
+
+1. `research-ingest enable`
+2. Open <http://127.0.0.1:18765/send>
+3. Drag **Send to Grok Research** onto the bookmarks bar
+
+**Every day:** select text (optional) → click the bookmark.
+
+**Or global hotkey (any app):**
 
 ```sh
-# Manual ops if needed
+research-send clip          # clipboard
+research-send selection     # primary selection (X11)
+# Bind Super+Shift+Y → research-send clip
+```
+
+```sh
 research-ingest service-status
 research-ingest status
-research-ingest disable   # stop always-on
+research-ingest disable
 ```
 
 See [packaging/nix-notes.md](packaging/nix-notes.md) for Nix/Gentoo/CachyOS/Void notes.
@@ -93,35 +105,17 @@ research-ingest process ~/path/to/scan.png
 research-ingest process ~/path/to/talk.mp4
 ```
 
-## Browser: Send to Grok Research
+## Send paths (persistent)
 
-**Can the extension be pure Rust?** No. Brave/Chrome MV3 loads a JavaScript service worker. Rust cannot replace that shell. What is pure Rust:
-
-- `research-send` native messaging host
-- all ingest / extract / MCP / Zotero tools
-
-The extension stays minimal JS that only calls the native host.
-
-1. Build and install the native host:
+| Path | Persistence | Notes |
+|------|-------------|--------|
+| **Bookmarklet** (recommended) | Permanent after one drag | Form POST to daemon; works on HTTPS pages |
+| **`research-send clip`** | Hotkey / desktop entry | Clipboard from any app |
+| Optional MV3 extension | Unpacked can break on Brave updates | Not required |
 
 ```sh
-cargo install --path crates/research-send
-research-send install-host
-```
-
-2. Load `browser-extension/` as an unpacked extension in Brave (`brave://extensions` → Developer mode).
-3. Copy the extension ID. Re-run:
-
-```sh
-research-send install-host --extension-id <YOUR_EXTENSION_ID>
-```
-
-4. Use the context menu, toolbar popup, or hotkey **Ctrl+Shift+Y** (macOS: **Cmd+Shift+Y**).
-
-CLI without the extension:
-
-```sh
-research-send text --text "quote" --url "https://example.com" --title "Example"
+research-send install                 # desktop entries + open install page
+research-send text --text "quote" --url "https://example.com"
 research-send file ~/Downloads/paper.pdf
 ```
 
