@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-dev.4] - 2026-07-22
+
+### Added
+
+- Permanent **bookmarklet** send via `POST /send-form` (works from HTTPS pages)
+- Install page at `GET http://127.0.0.1:18765/send`
+- `research-send clip` / `selection` for global hotkeys
+- `research-send install` desktop entries + bookmark helper
+- `enable` wires persistent send (no daily extension load)
+
+### Changed
+
+- Daily-use docs prefer bookmark/hotkey over unpacked Brave extension
+
 ## [0.1.0-dev.3] - 2026-07-22
 
 ### Added

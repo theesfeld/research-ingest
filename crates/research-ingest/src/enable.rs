@@ -66,15 +66,28 @@ pub fn enable_daemon(cfg: &Config) -> Result<()> {
     println!("incoming:{}", vault.incoming().display());
     if cfg.listen_http {
         println!("drop:    http://{}/send", cfg.listen_addr);
+        println!(
+            "install: http://{}/send   (drag bookmark — permanent, no extension)",
+            cfg.listen_addr
+        );
     }
     println!();
-    println!("Brave (one-time): load unpacked extension from:");
-    if let Some(ext) = extension_path() {
-        println!("  {}", ext.display());
-    } else {
-        println!("  <repo>/browser-extension");
-    }
-    println!("Then use context menu / Ctrl+Shift+Y / toolbar. No other steps.");
+
+    // Permanent send helpers (bookmarklet install page + desktop entries).
+    let _ = Command::new("research-send")
+        .args(["install", "--listen-addr", &cfg.listen_addr])
+        .status();
+
+    println!();
+    println!("Daily send (pick one — none require reloading an extension):");
+    println!(
+        "  • Bookmark: open http://{}/send once, drag button to bookmarks bar",
+        cfg.listen_addr
+    );
+    println!("  • Hotkey:   bind Super+Shift+Y → research-send clip");
+    println!("  • Desktop:  “Send clipboard to Grok Research” app menu entry");
+    println!();
+    println!("Optional: browser extension is NOT required for daily use.");
     Ok(())
 }
 
@@ -150,19 +163,6 @@ fn run_systemctl(args: &[&str]) -> Result<()> {
         bail!("systemctl {} failed", args.join(" "));
     }
     Ok(())
-}
-
-fn extension_path() -> Option<PathBuf> {
-    let candidates = [
-        PathBuf::from("/home/glenda/Projects/research-ingest/browser-extension"),
-        std::env::current_dir()
-            .ok()
-            .map(|c| c.join("browser-extension"))
-            .unwrap_or_default(),
-    ];
-    candidates
-        .into_iter()
-        .find(|p| p.join("manifest.json").is_file())
 }
 
 /// Tiny HTTP GET without extra deps (for enable health print).
