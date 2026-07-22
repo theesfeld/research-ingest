@@ -1,21 +1,20 @@
 # Send to Grok Research (browser extension)
 
-Minimal Brave/Chrome MV3 extension. It only collects page/selection/image metadata and sends it to the **Rust** native host `research-send`.
+Minimal Brave/Chrome MV3 extension. Daily path: **HTTP drop** to the always-on daemon.
 
-## Why this is not pure Rust
+## How send works
 
-Chromium MV3 requires a JavaScript service worker (`background.js`) to use `chrome.*` APIs (context menus, native messaging, hotkeys). A pure-Rust extension is not possible for Brave/Chrome.
+1. Preferred: `POST http://127.0.0.1:18765/send` (daemon from `research-ingest enable`)
+2. Fallback: native messaging host `research-send host`
 
-Rust owns:
+## Why not pure Rust
 
-- native messaging host (`research-send host`)
-- vault write path
-- all processing
+Chromium MV3 requires a JavaScript service worker for `chrome.*` APIs. The native host and all processing stay Rust.
 
-Optional later: compile shared logic to WASM and call it from JS. That still needs a JS shell.
+## One-time setup
 
-## Install
+1. `research-ingest enable` (always-on daemon)
+2. Brave → Extensions → Developer mode → Load unpacked → this folder
+3. Use right-click **Send to Grok Research**, toolbar, or **Ctrl+Shift+Y**
 
-1. `cargo install --path crates/research-send`
-2. Load this folder as an unpacked extension in Brave.
-3. `research-send install-host --extension-id <id-from-brave>`
+No further steps. The daemon processes OCR, transcripts, and Grok notes in the background.

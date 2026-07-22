@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-dev.3] - 2026-07-22
+
+### Added
+
+- Always-on mode: `research-ingest enable` (systemd --user + linger)
+- Localhost HTTP drop `POST http://127.0.0.1:18765/send` for Brave
+- Extension prefers HTTP drop; native host is fallback
+- `service-status` / `disable` commands; doctor reports daemon health
+- Stable-file wait so browser writes finish before process
+
+### Changed
+
+- Watcher serves HTTP drop and filesystem watch in one process
+- Version `0.1.0-dev.3`
+
 ## [0.1.0-dev.2] - 2026-07-22
 
 ### Added

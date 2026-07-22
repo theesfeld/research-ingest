@@ -1,15 +1,18 @@
 [Unit]
-Description=research-ingest vault watcher (Grok session processing)
-After=network-online.target
+Description=research-ingest always-on vault watcher + Brave drop
+After=default.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 ExecStart=%h/.cargo/bin/research-ingest watch
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=3
+Environment=PATH=%h/.cargo/bin:%h/.nix-profile/bin:%h/.local/bin:/etc/profiles/per-user/%u/bin:/run/current-system/sw/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
 Environment=RUST_LOG=info
-# SuperGrok session lives in ~/.grok/auth.json — do not set XAI_API_KEY here.
+# SuperGrok session only — do not set a console API key
+Environment=XAI_API_KEY=
 
 [Install]
 WantedBy=default.target

@@ -16,7 +16,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0-dev.2"
+version = "0.1.0-dev.3"
 edition = "2021"
 license = "MIT"
 authors = ["theesfeld"]
